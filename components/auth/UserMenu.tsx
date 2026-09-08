@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { signOut } from "@/app/(auth)/actions";
 
-export type SessionUser = { id: string; email: string | null };
+export type SessionUser = { id: string; email: string | null; isAnonymous?: boolean };
 
 function initialFor(email: string | null): string {
   return (email?.trim()[0] ?? "?").toUpperCase();
@@ -51,10 +51,19 @@ export function UserMenu({ user }: { user: SessionUser }) {
           className="absolute right-0 top-11 z-50 w-60 animate-pop-in overflow-hidden rounded-xl border border-border-base bg-surface shadow-xl"
         >
           <div className="border-b border-border-base px-4 py-3">
-            <p className="text-xs text-foreground-subtle">Signed in as</p>
-            <p className="truncate text-sm font-medium" title={user.email ?? undefined}>
-              {user.email ?? "your account"}
-            </p>
+            {user.isAnonymous ? (
+              <>
+                <p className="text-xs text-foreground-subtle">Preview session</p>
+                <p className="truncate text-sm font-medium">Not signed up yet</p>
+              </>
+            ) : (
+              <>
+                <p className="text-xs text-foreground-subtle">Signed in as</p>
+                <p className="truncate text-sm font-medium" title={user.email ?? undefined}>
+                  {user.email ?? "your account"}
+                </p>
+              </>
+            )}
           </div>
 
           <div className="p-1.5">
@@ -67,13 +76,26 @@ export function UserMenu({ user }: { user: SessionUser }) {
               Workspace
             </Link>
 
+            {/* A preview session has nothing to come back to, so the useful
+                action is creating a real account rather than managing this one. */}
+            {user.isAnonymous && (
+              <Link
+                href="/signup"
+                onClick={() => setOpen(false)}
+                role="menuitem"
+                className="block rounded-lg px-2.5 py-2 text-sm font-medium text-brand-600 transition-colors hover:bg-surface-muted dark:text-brand-300"
+              >
+                Sign up free
+              </Link>
+            )}
+
             <form action={signOut}>
               <button
                 type="submit"
                 role="menuitem"
                 className="w-full rounded-lg px-2.5 py-2 text-left text-sm text-red-600 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
               >
-                Sign out
+                {user.isAnonymous ? "End preview" : "Sign out"}
               </button>
             </form>
           </div>

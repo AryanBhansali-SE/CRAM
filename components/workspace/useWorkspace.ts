@@ -8,23 +8,32 @@ import {
   fetchDocuments,
   messageFrom,
   uploadDocuments,
+  LimitError,
   UnauthorizedError,
 } from "@/lib/api";
+import { outOfDocuments, outOfQuestions } from "@/lib/tiers";
 import { formatCount } from "@/lib/utils";
-import type { CramDocument, ThreadMessage } from "@/lib/types";
+import type { CramDocument, LimitCode, ThreadMessage, UsageSnapshot } from "@/lib/types";
 
 /** How many prior turns travel with each question so follow-ups resolve. */
 const HISTORY_LIMIT = 6;
 
 export type Notice = { tone: "info" | "success" | "error"; text: string } | null;
 
+/** Which wall is up, and what triggered it. */
+export type Wall = { code: LimitCode } | null;
+
 function newId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
 /**
- * All workspace state in one place: documents, the chat thread, and the
- * in-flight flags the UI needs. Components stay presentational.
+ * All workspace state in one place: documents, the chat thread, usage against
+ * the plan, and the in-flight flags the UI needs. Components stay presentational.
+ *
+ * The limit checks here are for responsiveness only — they save a round trip and
+ * keep the composer honest. Every one of them is also enforced in the API route,
+ * which is what actually holds.
  */
 export function useWorkspace() {
   const router = useRouter();
@@ -40,6 +49,9 @@ export function useWorkspace() {
   const [messages, setMessages] = useState<ThreadMessage[]>([]);
   const [asking, setAsking] = useState(false);
   const [input, setInput] = useState("");
+
+  const [usage, setUsage] = useState<UsageSnapshot | null>(null);
+  const [wall, setWall] = useState<Wall>(null);
 
   // Guards against setting state after the component unmounts mid-request.
   const alive = useRef(true);
@@ -65,12 +77,33 @@ export function useWorkspace() {
     [router]
   );
 
+  /**
+   * A 403 on tier grounds isn't an error to report — it's a wall to raise. The
+   * refusal carries fresh usage, so the meter corrects itself at the same time.
+   */
+  const handleLimitError = useCallback((err: unknown): boolean => {
+    if (err instanceof LimitError) {
+      if (alive.current) {
+        setUsage(err.usage);
+        setWall({ code: err.code });
+      }
+      return true;
+    }
+    return false;
+  }, []);
+
+  const closeWall = useCallback(() => setWall(null), []);
+  const openWall = useCallback((code: LimitCode) => setWall({ code }), []);
+
   const loadDocuments = useCallback(async () => {
     setDocsLoading(true);
     setDocsError(null);
     try {
-      const docs = await fetchDocuments();
-      if (alive.current) setDocuments(docs);
+      const { documents: docs, usage: fresh } = await fetchDocuments();
+      if (alive.current) {
+        setDocuments(docs);
+        if (fresh) setUsage(fresh);
+      }
     } catch (err) {
       if (handleAuthError(err)) return;
       if (alive.current) setDocsError(messageFrom(err));
@@ -86,6 +119,14 @@ export function useWorkspace() {
   const upload = useCallback(
     async (files: File[]) => {
       if (files.length === 0 || uploading) return;
+
+      // Already at the cap: show the wall rather than uploading a file the
+      // server is only going to refuse.
+      if (outOfDocuments(usage)) {
+        setWall({ code: "document_limit" });
+        return;
+      }
+
       setUploading(true);
       setNotice({ tone: "info", text: `Processing ${formatCount(files.length, "PDF")}…` });
 
@@ -95,26 +136,31 @@ export function useWorkspace() {
         const failures = result.failures ?? [];
 
         if (alive.current) {
+          if (result.usage) setUsage(result.usage);
           setNotice(
             failures.length > 0
               ? {
                   tone: "error",
-                  text: `Added ${formatCount(added, "document")}. Couldn't read ${failures
+                  text: `Added ${formatCount(added, "document")}. Couldn't add ${failures
                     .map((f) => f.filename)
                     .join(", ")}.`,
                 }
               : { tone: "success", text: `Added ${formatCount(added, "document")}.` }
           );
+          // Part of the batch didn't fit the plan — say why, once the upload
+          // that did fit has landed.
+          if (result.limitReached) setWall({ code: "document_limit" });
         }
         await loadDocuments();
       } catch (err) {
         if (handleAuthError(err)) return;
+        if (handleLimitError(err)) return;
         if (alive.current) setNotice({ tone: "error", text: messageFrom(err) });
       } finally {
         if (alive.current) setUploading(false);
       }
     },
-    [handleAuthError, loadDocuments, uploading]
+    [handleAuthError, handleLimitError, loadDocuments, uploading, usage]
   );
 
   const remove = useCallback(
@@ -122,9 +168,10 @@ export function useWorkspace() {
       setRemovingId(doc.documentId);
       setNotice(null);
       try {
-        await deleteDocument(doc.documentId);
+        const fresh = await deleteDocument(doc.documentId);
         if (alive.current) {
           setDocuments((prev) => prev.filter((d) => d.documentId !== doc.documentId));
+          if (fresh) setUsage(fresh);
           setNotice({ tone: "success", text: `Removed ${doc.filename}.` });
         }
       } catch (err) {
@@ -142,19 +189,29 @@ export function useWorkspace() {
       const question = (raw ?? input).trim();
       if (!question || asking) return;
 
+      // Out of questions: raise the wall and keep what they typed, rather than
+      // sending a request that can only come back refused.
+      if (outOfQuestions(usage)) {
+        setInput(question);
+        setWall({ code: "question_limit" });
+        return;
+      }
+
       // History is the thread as it stood *before* this question.
       const history = messages
         .filter((m) => !m.error)
         .slice(-HISTORY_LIMIT)
         .map((m) => ({ role: m.role, content: m.content }));
 
-      setMessages((prev) => [...prev, { id: newId(), role: "user", content: question }]);
+      const pendingId = newId();
+      setMessages((prev) => [...prev, { id: pendingId, role: "user", content: question }]);
       setInput("");
       setAsking(true);
 
       try {
         const data = await askQuestion(question, history);
         if (alive.current) {
+          if (data.usage) setUsage(data.usage);
           setMessages((prev) => [
             ...prev,
             {
@@ -167,6 +224,18 @@ export function useWorkspace() {
         }
       } catch (err) {
         if (handleAuthError(err)) return;
+
+        // The question was never answered, so take it back out of the thread and
+        // hand the text back to the composer instead of leaving a dead turn.
+        if (err instanceof LimitError) {
+          if (alive.current) {
+            setMessages((prev) => prev.filter((m) => m.id !== pendingId));
+            setInput(question);
+          }
+          handleLimitError(err);
+          return;
+        }
+
         if (alive.current) {
           setMessages((prev) => [
             ...prev,
@@ -182,7 +251,7 @@ export function useWorkspace() {
         if (alive.current) setAsking(false);
       }
     },
-    [asking, handleAuthError, input, messages]
+    [asking, handleAuthError, handleLimitError, input, messages, usage]
   );
 
   const clearThread = useCallback(() => setMessages([]), []);
@@ -205,5 +274,11 @@ export function useWorkspace() {
     send,
     clearThread,
     hasDocuments: documents.length > 0,
+    usage,
+    wall,
+    openWall,
+    closeWall,
+    atDocumentLimit: outOfDocuments(usage),
+    atQuestionLimit: outOfQuestions(usage),
   };
 }

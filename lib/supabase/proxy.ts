@@ -59,7 +59,10 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
     return copyCookies(response, NextResponse.redirect(url));
   }
 
-  if (user && AUTH_ONLY_PATHS.includes(pathname)) {
+  // An anonymous trial visitor counts as signed in, but sign-up is precisely
+  // where the trial wall sends them — bouncing them back to the workspace would
+  // make the wall's own button a no-op.
+  if (user && !user.is_anonymous && AUTH_ONLY_PATHS.includes(pathname)) {
     const url = request.nextUrl.clone();
     url.pathname = "/workspace";
     url.search = "";

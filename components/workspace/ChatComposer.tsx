@@ -10,6 +10,7 @@ export function ChatComposer({
   disabled,
   busy,
   placeholder,
+  hint,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -17,6 +18,8 @@ export function ChatComposer({
   disabled?: boolean;
   busy?: boolean;
   placeholder: string;
+  /** Replaces the keyboard-shortcut footer, e.g. when the allowance is spent. */
+  hint?: string;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -75,9 +78,10 @@ export function ChatComposer({
         </div>
 
         <p className="mt-2 px-1 text-xs text-foreground-subtle">
-          {disabled
-            ? "Upload a PDF to start asking questions."
-            : "Enter to send · Shift + Enter for a new line"}
+          {hint ??
+            (disabled
+              ? "Upload a PDF to start asking questions."
+              : "Enter to send · Shift + Enter for a new line")}
         </p>
       </div>
     </div>

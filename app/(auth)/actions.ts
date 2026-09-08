@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
+import { anonymousTrialEnabled } from "@/lib/auth-shared";
 
 export type AuthState = {
   error?: string;
@@ -101,6 +102,33 @@ export async function signInWithGoogle(formData: FormData): Promise<void> {
   }
 
   redirect(data.url);
+}
+
+/**
+ * Starts the anonymous preview.
+ *
+ * signInAnonymously mints a real row in auth.users with is_anonymous set, so the
+ * visitor gets a genuine auth.uid() and every existing RLS policy covers their
+ * uploads unchanged — no service-role writes, no client-supplied identifier to
+ * forge. The tier logic reads is_anonymous to cap them at the trial allowance.
+ */
+export async function startTrial(): Promise<void> {
+  if (!anonymousTrialEnabled()) {
+    redirect("/signup");
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase.auth.signInAnonymously();
+
+  if (error) {
+    // Almost always anonymous_provider_disabled — the project toggle is off.
+    // Sending them to sign-up is a working path, not a dead end.
+    console.error("Anonymous trial sign-in failed:", error.message);
+    redirect("/signup?error=" + encodeURIComponent("Preview is unavailable — create a free account instead."));
+  }
+
+  revalidatePath("/", "layout");
+  redirect("/workspace");
 }
 
 export async function signOut(): Promise<void> {

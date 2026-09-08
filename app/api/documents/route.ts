@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { getUsage } from "@/lib/limits";
 
 type DocumentRow = {
   id: string;
@@ -33,6 +34,8 @@ export async function GET() {
 
     if (error) throw error;
 
+    // The usage meter rides along with the document list, so the workspace has
+    // its numbers on first paint without a second request.
     return NextResponse.json({
       documents: ((data ?? []) as unknown as DocumentRow[]).map((doc) => ({
         documentId: doc.id,
@@ -40,6 +43,7 @@ export async function GET() {
         createdAt: doc.created_at,
         chunks: doc.chunks?.[0]?.count ?? 0,
       })),
+      usage: await getUsage(supabase, user),
     });
   } catch (err) {
     console.error("Documents list error:", err);
@@ -95,7 +99,12 @@ export async function DELETE(req: NextRequest) {
 
     if (docError) throw docError;
 
-    return NextResponse.json({ success: true, documentId });
+    // Removing a document frees a slot, so the caller gets the fresh count.
+    return NextResponse.json({
+      success: true,
+      documentId,
+      usage: await getUsage(supabase, user),
+    });
   } catch (err) {
     console.error("Document delete error:", err);
     return NextResponse.json({ error: errorMessage(err) }, { status: 500 });

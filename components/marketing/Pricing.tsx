@@ -1,19 +1,25 @@
 import { ButtonLink } from "@/components/ui/Button";
 import { cn } from "@/lib/utils";
 import { startHref } from "@/lib/auth-shared";
+import { UPGRADE_URL } from "@/lib/tiers";
 
+/**
+ * The Free and Pro rows describe the allowances that lib/limits.ts actually
+ * enforces — keep the two in step if either changes.
+ */
 const tiers = [
   {
     name: "Free",
     price: "$0",
     cadence: "forever",
     tagline: "Enough to get through a midterm.",
-    features: ["3 documents", "50 questions a month", "Answers with sources", "Summaries"],
+    features: ["3 documents", "10 questions a day", "Answers with sources", "Summaries"],
     cta: "Start free",
     featured: false,
+    external: false,
   },
   {
-    name: "Student",
+    name: "Pro",
     price: "$8",
     cadence: "per month",
     tagline: "For a full course load, all semester.",
@@ -24,17 +30,19 @@ const tiers = [
       "Priority processing",
       "Export summaries",
     ],
-    cta: "Go Student",
+    cta: "Upgrade to Pro",
     featured: true,
+    external: true,
   },
   {
     name: "Study group",
     price: "$20",
     cadence: "per month",
     tagline: "Share a library with your classmates.",
-    features: ["Everything in Student", "Up to 5 seats", "Shared document library", "Group chat history"],
+    features: ["Everything in Pro", "Up to 5 seats", "Shared document library", "Group chat history"],
     cta: "Get Study group",
     featured: false,
+    external: false,
   },
 ];
 
@@ -104,9 +112,10 @@ export function Pricing({
               </div>
 
               <ButtonLink
-                href={startHref(authed)}
+                href={tier.external ? UPGRADE_URL : startHref(authed)}
                 variant={tier.featured ? "primary" : "secondary"}
                 className="mt-6 w-full"
+                {...(tier.external ? { target: "_blank", rel: "noopener noreferrer" } : {})}
               >
                 {tier.cta}
               </ButtonLink>
@@ -126,8 +135,8 @@ export function Pricing({
         </div>
 
         <p className="mt-10 text-center text-sm text-foreground-subtle">
-          Billing isn&apos;t wired up yet — every plan opens the full workspace while Cram is in
-          preview.
+          Free and Pro are live. Study group is still on the way — start free and upgrade whenever
+          the reading piles up.
         </p>
       </div>
     </section>

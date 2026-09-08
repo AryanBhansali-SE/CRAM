@@ -12,7 +12,13 @@ export default async function WorkspaceLayout({ children }: { children: ReactNod
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden">
-      <WorkspaceHeader user={{ id: user.id, email: user.email ?? null }} />
+      <WorkspaceHeader
+        user={{
+          id: user.id,
+          email: user.email ?? null,
+          isAnonymous: user.is_anonymous === true,
+        }}
+      />
       {children}
     </div>
   );

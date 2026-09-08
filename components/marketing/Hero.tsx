@@ -1,5 +1,6 @@
-import { ButtonLink } from "@/components/ui/Button";
+import { Button, ButtonLink } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Card";
+import { startTrial } from "@/app/(auth)/actions";
 import { startHref } from "@/lib/auth-shared";
 
 /** A static preview of the workspace, so visitors see the product immediately. */
@@ -46,7 +47,7 @@ function ChatPreview() {
   );
 }
 
-export function Hero({ authed }: { authed: boolean }) {
+export function Hero({ authed, trialEnabled = false }: { authed: boolean; trialEnabled?: boolean }) {
   return (
     <section className="relative overflow-hidden">
       <div className="hero-glow pointer-events-none absolute inset-0 -z-10" aria-hidden />
@@ -88,13 +89,25 @@ export function Hero({ authed }: { authed: boolean }) {
                 />
               </svg>
             </ButtonLink>
-            <ButtonLink href="/#how-it-works" size="lg" variant="secondary">
-              See how it works
-            </ButtonLink>
+            {!authed && trialEnabled ? (
+              <form action={startTrial}>
+                <Button type="submit" size="lg" variant="secondary">
+                  Try it — no signup
+                </Button>
+              </form>
+            ) : (
+              <ButtonLink href="/#how-it-works" size="lg" variant="secondary">
+                See how it works
+              </ButtonLink>
+            )}
           </div>
 
           <p className="animate-fade-up mt-5 text-sm text-foreground-subtle [animation-delay:220ms]">
-            {authed ? "Your materials are ready when you are." : "No credit card. Free to start."}
+            {authed
+              ? "Your materials are ready when you are."
+              : trialEnabled
+                ? "No credit card. Preview one document and three questions without an account."
+                : "No credit card. Free to start."}
           </p>
         </div>
 

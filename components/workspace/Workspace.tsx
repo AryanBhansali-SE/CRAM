@@ -6,8 +6,11 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { DocumentList } from "./DocumentList";
 import { MessageBubble, ThinkingBubble } from "./MessageBubble";
 import { NoDocumentsState, NoMessagesState } from "./ChatEmptyState";
+import { LimitWall } from "./LimitWall";
 import { UploadDropzone } from "./UploadDropzone";
+import { UsageMeter } from "./UsageMeter";
 import { useWorkspace } from "./useWorkspace";
+import { resetHint } from "@/lib/tiers";
 import { cn, formatCount } from "@/lib/utils";
 import type { CramDocument } from "@/lib/types";
 
@@ -76,13 +79,19 @@ export function Workspace() {
         />
       </div>
 
-      {ws.documents.length > 0 && (
-        <div className="border-t border-border-base px-5 py-3">
+      <div className="space-y-2 border-t border-border-base px-5 py-3">
+        {ws.documents.length > 0 && (
           <p className="text-xs leading-relaxed text-foreground-subtle">
             Questions search all {formatCount(ws.documents.length, "document")} together.
           </p>
-        </div>
-      )}
+        )}
+        <UsageMeter
+          usage={ws.usage}
+          onUpgrade={() =>
+            ws.openWall(ws.atDocumentLimit ? "document_limit" : "question_limit")
+          }
+        />
+      </div>
     </div>
   );
 
@@ -172,6 +181,11 @@ export function Workspace() {
           <div ref={bottomRef} />
         </div>
 
+        {/*
+          Left enabled at the question limit on purpose: sending raises the wall,
+          which explains the limit and offers the way past it. A dead textarea
+          would just look broken.
+        */}
         <ChatComposer
           value={ws.input}
           onChange={ws.setInput}
@@ -181,8 +195,25 @@ export function Workspace() {
           placeholder={
             ws.hasDocuments ? "Ask about your materials…" : "Upload a PDF to get started…"
           }
+          hint={
+            ws.atQuestionLimit
+              ? ws.usage?.tier === "trial"
+                ? "That's the end of your free preview — sign up to keep going."
+                : `You're out of questions for now${
+                    resetHint(ws.usage) ? ` — resets ${resetHint(ws.usage)}` : ""
+                  }.`
+              : undefined
+          }
         />
       </div>
+
+      <LimitWall
+        open={ws.wall !== null}
+        tier={ws.usage?.tier ?? "free"}
+        code={ws.wall?.code ?? "question_limit"}
+        usage={ws.usage}
+        onClose={ws.closeWall}
+      />
 
       <ConfirmDialog
         open={pendingRemoval !== null}

@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { embed, askLLM } from "@/lib/gemini";
+import {
+  getUsage,
+  limitPayload,
+  questionsRemaining,
+  recordQuestion,
+  withQuestionSpent,
+} from "@/lib/limits";
 import type { ChatMessage } from "@/lib/types";
 
 type Match = { id: string; content: string; similarity: number };
@@ -84,6 +91,14 @@ export async function POST(req: NextRequest) {
     }
     const userId = user.id;
 
+    // Refuse before spending an embedding or an LLM call. The composer also
+    // disables itself when the allowance runs out, but this is the check that
+    // actually holds: a direct POST to this route lands on exactly this line.
+    const usage = await getUsage(supabase, user);
+    if (questionsRemaining(usage) === 0) {
+      return NextResponse.json(limitPayload("question_limit", usage), { status: 403 });
+    }
+
     const body = await req.json();
     const question: string = body.question;
     const rawHistory: unknown[] = Array.isArray(body.history) ? body.history : [];
@@ -161,10 +176,14 @@ export async function POST(req: NextRequest) {
     }
 
     if (chunks.length === 0) {
+      // This still cost a rewrite, an embedding and a retrieval round trip, so
+      // it counts against the allowance like any other question.
+      await recordQuestion(supabase, userId);
       return NextResponse.json({
         answer:
           "I couldn't find anything relevant in your materials. Try uploading a document first, or rephrasing the question.",
         sources: [],
+        usage: withQuestionSpent(usage),
       });
     }
 
@@ -190,12 +209,14 @@ ANSWER:`;
 
     // 5. Get the answer from the LLM.
     const answer = await askLLM(prompt);
+    await recordQuestion(supabase, userId);
 
     return NextResponse.json({
       answer,
       sourcesUsed: chunks.length,
       sources: [...new Set(chunks.map((c) => c.filename))],
       retrievalQuery,
+      usage: withQuestionSpent(usage),
     });
   } catch (err) {
     console.error("Query error:", err);

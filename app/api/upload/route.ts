@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { embed } from "@/lib/gemini";
+import {
+  documentsRemaining,
+  getUsage,
+  limitPayload,
+  withDocumentsAdded,
+} from "@/lib/limits";
 import PDFParser from "pdf2json";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -143,11 +149,28 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "No file provided" }, { status: 400 });
     }
 
+    // Enforce the document allowance server-side. The dropzone greys itself out
+    // at the limit, but this is the check a direct multipart POST runs into.
+    const usage = await getUsage(supabase, user);
+    const remaining = documentsRemaining(usage);
+
+    if (remaining === 0) {
+      return NextResponse.json(limitPayload("document_limit", usage), { status: 403 });
+    }
+
+    // A batch that only partly fits: ingest what there's room for and report the
+    // rest as refusals, rather than rejecting files we could have accepted.
+    const accepted = remaining === null ? files : files.slice(0, remaining);
+    const refused = remaining === null ? [] : files.slice(remaining);
+
     const results: IngestResult[] = [];
-    const failures: { filename: string; error: string }[] = [];
+    const failures: { filename: string; error: string }[] = refused.map((file) => ({
+      filename: file.name,
+      error: "Skipped — that would go past your plan's document limit.",
+    }));
 
     // Sequential across files: each PDF already parallelises its own embeddings.
-    for (const file of files) {
+    for (const file of accepted) {
       try {
         results.push(await ingestFile(supabase, file, userId));
       } catch (err) {
@@ -167,6 +190,10 @@ export async function POST(req: NextRequest) {
       success: true,
       documents: results,
       failures,
+      usage: withDocumentsAdded(usage, results.length),
+      // Set when part of the batch was turned away by the plan limit, so the
+      // client knows to raise the upgrade wall after a partial success.
+      limitReached: refused.length > 0,
       // Preserved for the original single-file response shape.
       documentId: results[0].documentId,
       chunks: results.reduce((total, r) => total + r.chunks, 0),

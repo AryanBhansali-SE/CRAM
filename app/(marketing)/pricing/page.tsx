@@ -11,7 +11,7 @@ export const metadata: Metadata = {
 const faqs = [
   {
     q: "Do I need to pay to try it?",
-    a: "No. The free plan covers three documents and fifty questions a month, which is enough to get through a midterm.",
+    a: "No. The free plan covers three documents and ten questions a day, which is enough to get through a midterm. You can also preview Cram without an account at all — one document and three questions.",
   },
   {
     q: "What happens to my documents?",
@@ -22,13 +22,15 @@ const faqs = [
     a: "No, and that's the point. Answers are grounded in the passages retrieved from your uploads. If something isn't there, Cram says so.",
   },
   {
-    q: "Is billing live yet?",
-    a: "Not yet. Cram is in preview, so every plan currently opens the full workspace.",
+    q: "When do the daily questions reset?",
+    a: "They roll: each question frees up again 24 hours after you asked it, so you're never waiting on a fixed midnight in some other timezone.",
   },
 ];
 
 export default async function PricingPage() {
-  const authed = (await getUser()) !== null;
+  const user = await getUser();
+  // An anonymous preview visitor hasn't signed up, so the CTAs still say so.
+  const authed = !!user && !user.is_anonymous;
 
   return (
     <>

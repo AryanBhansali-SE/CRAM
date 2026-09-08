@@ -9,7 +9,13 @@ export default async function MarketingLayout({ children }: { children: ReactNod
 
   return (
     <div className="flex min-h-dvh flex-col">
-      <SiteHeader user={user ? { id: user.id, email: user.email ?? null } : null} />
+      <SiteHeader
+        user={
+          user
+            ? { id: user.id, email: user.email ?? null, isAnonymous: user.is_anonymous === true }
+            : null
+        }
+      />
       <main className="flex-1">{children}</main>
       <SiteFooter />
     </div>
