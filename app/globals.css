@@ -1,0 +1,182 @@
+@import "tailwindcss";
+
+/* Dark mode is class-driven so the header toggle can override the OS. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ---------------------------------------------------------------------------
+   Design tokens. Brand ramp + fonts + motion, available as Tailwind utilities
+   (bg-brand-500, font-sans, animate-fade-up, ...).
+--------------------------------------------------------------------------- */
+@theme {
+  --color-brand-50: #f2f1ff;
+  --color-brand-100: #e7e5ff;
+  --color-brand-200: #d3cdff;
+  --color-brand-300: #b4a9ff;
+  --color-brand-400: #907bff;
+  --color-brand-500: #6f4ff5;
+  --color-brand-600: #5f33e8;
+  --color-brand-700: #5024cc;
+  --color-brand-800: #4320a6;
+  --color-brand-900: #391e84;
+
+  --color-accent-400: #fbbf24;
+  --color-accent-500: #f59e0b;
+  --color-accent-600: #d97706;
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace;
+
+  --animate-fade-up: fade-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-fade-in: fade-in 0.4s ease-out both;
+  --animate-pop-in: pop-in 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-shimmer: shimmer 1.6s linear infinite;
+  --animate-blink: blink 1.4s ease-in-out infinite;
+}
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes pop-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes shimmer {
+  from { background-position: -200% 0; }
+  to { background-position: 200% 0; }
+}
+@keyframes blink {
+  0%, 80%, 100% { opacity: 0.25; }
+  40% { opacity: 1; }
+}
+
+/* ---------------------------------------------------------------------------
+   Semantic colors. One set of names, two themes.
+--------------------------------------------------------------------------- */
+:root {
+  --background: #fbfaf9;
+  --surface: #ffffff;
+  --surface-muted: #f4f2f0;
+  --foreground: #17171c;
+  --foreground-muted: #6c6c78;
+  --foreground-subtle: #96959f;
+  --border: #e7e3de;
+  --border-strong: #d6d1cb;
+  --ring: #6f4ff5;
+}
+
+.dark {
+  --background: #0b0b10;
+  --surface: #141419;
+  --surface-muted: #1c1c23;
+  --foreground: #f3f3f6;
+  --foreground-muted: #a2a2ad;
+  --foreground-subtle: #74747f;
+  --border: #26262e;
+  --border-strong: #34343e;
+  --ring: #907bff;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-foreground: var(--foreground);
+  --color-foreground-muted: var(--foreground-muted);
+  --color-foreground-subtle: var(--foreground-subtle);
+  --color-border-base: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-ring: var(--ring);
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Consistent focus ring on every interactive element. */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: var(--color-brand-200);
+    color: var(--color-brand-900);
+  }
+  .dark ::selection {
+    background: var(--color-brand-700);
+    color: #fff;
+  }
+}
+
+@layer utilities {
+  /* Slim scrollbar for the chat thread and sidebar. */
+  .scrollbar-slim {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+  .scrollbar-slim::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  .scrollbar-slim::-webkit-scrollbar-thumb {
+    background-color: var(--border-strong);
+    border-radius: 9999px;
+  }
+  .scrollbar-slim::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .skeleton {
+    background-image: linear-gradient(
+      90deg,
+      var(--surface-muted) 25%,
+      var(--border) 50%,
+      var(--surface-muted) 75%
+    );
+    background-size: 200% 100%;
+    animation: var(--animate-shimmer);
+  }
+
+  /* Soft brand glow behind hero sections. */
+  .hero-glow {
+    background:
+      radial-gradient(60% 60% at 15% 0%, color-mix(in oklab, var(--color-brand-400) 22%, transparent), transparent 70%),
+      radial-gradient(50% 50% at 90% 10%, color-mix(in oklab, var(--color-accent-400) 16%, transparent), transparent 70%);
+  }
+
+  .grid-bg {
+    background-image:
+      linear-gradient(to right, var(--border) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--border) 1px, transparent 1px);
+    background-size: 56px 56px;
+  }
+}
+
+/* Respect users who prefer less motion. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
