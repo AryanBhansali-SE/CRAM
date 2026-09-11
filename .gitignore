@@ -41,6 +41,10 @@ yarn-error.log*
 supabase/.temp/
 supabase/.branches/
 
+# claude code — local settings and agent worktrees (each worktree is a full
+# second checkout, node_modules and all, so this must never be committed)
+.claude/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
