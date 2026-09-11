@@ -3,13 +3,19 @@
 import { useRef, useState } from "react";
 import { Spinner } from "@/components/ui/Spinner";
 import { cn } from "@/lib/utils";
+import { MAX_FILE_BYTES, megabytes } from "@/lib/uploads";
 
 const ACCEPT = ".pdf,application/pdf";
 
-function onlyPdfs(list: FileList | null): File[] {
-  return Array.from(list ?? []).filter(
-    (f) => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf")
-  );
+/**
+ * Everything dropped is handed on, including the files we can't read.
+ *
+ * Silently discarding a dragged .docx looked like the app had ignored the drop.
+ * The upload pipeline screens by type and size before sending anything, so the
+ * user gets "lecture.docx isn't a PDF" by name and nothing is wasted on the wire.
+ */
+function droppedFiles(list: FileList | null): File[] {
+  return Array.from(list ?? []).filter((f) => f.size > 0);
 }
 
 /**
@@ -38,12 +44,12 @@ export function UploadDropzone({
     dragDepth.current = 0;
     setDragging(false);
     if (uploading) return;
-    const files = onlyPdfs(e.dataTransfer.files);
+    const files = droppedFiles(e.dataTransfer.files);
     if (files.length > 0) onFiles(files);
   }
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = onlyPdfs(e.target.files);
+    const files = droppedFiles(e.target.files);
     if (files.length > 0) onFiles(files);
     e.target.value = "";
   }
@@ -117,7 +123,9 @@ export function UploadDropzone({
           {uploading ? "Processing your PDFs…" : dragging ? "Drop to upload" : "Add PDFs"}
         </span>
         <span className={cn("text-foreground-subtle", isPanel ? "text-sm" : "text-xs")}>
-          {uploading ? "This can take a moment for long documents" : "Drag and drop, or click to browse"}
+          {uploading
+            ? "This can take a minute for long documents"
+            : `Drag and drop, or click to browse · PDFs up to ${megabytes(MAX_FILE_BYTES)}`}
         </span>
       </button>
     </div>

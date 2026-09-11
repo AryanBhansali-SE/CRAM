@@ -7,6 +7,21 @@ export type ChatMessage = {
   content: string;
 };
 
+/**
+ * What the user asked for. Every mode retrieves from their own documents and
+ * spends one question from their allowance — only the retrieval strategy and
+ * the prompt differ.
+ */
+export type QueryMode = "ask" | "quiz" | "summarize" | "explain";
+
+/** One practice question. The answer stays hidden until the user reveals it. */
+export type QuizItem = {
+  question: string;
+  answer: string;
+  /** "recall" is a fact to remember; "concept" asks them to reason. */
+  kind: "recall" | "concept";
+};
+
 /** A message as rendered in the workspace thread. */
 export type ThreadMessage = ChatMessage & {
   id: string;
@@ -14,6 +29,16 @@ export type ThreadMessage = ChatMessage & {
   sources?: string[];
   /** Set when the assistant turn failed, so the UI can style it as an error. */
   error?: boolean;
+  /** Present on quiz turns — rendered as reveal cards rather than prose. */
+  quiz?: QuizItem[];
+  /** Which quick action produced this turn, for labelling. */
+  mode?: QueryMode;
+  /**
+   * Set on an error turn the user can sensibly repeat (a rate limit, a brief
+   * outage). Carries what to re-send so "Try again" doesn't need them to retype
+   * anything — which matters for quiz and summarize, where they never typed.
+   */
+  retry?: { question: string; mode: QueryMode; documentId: string | null };
 };
 
 export type CramDocument = {
@@ -44,7 +69,12 @@ export type QueryResponse = {
   sourcesUsed?: number;
   retrievalQuery?: string;
   usage?: UsageSnapshot;
+  /** Populated for mode "quiz". */
+  quiz?: QuizItem[];
+  mode?: QueryMode;
   error?: string;
+  /** True when the failure is worth retrying (upstream rate limit or outage). */
+  retryable?: boolean;
 };
 
 export type DocumentsResponse = {

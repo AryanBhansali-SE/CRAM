@@ -7,6 +7,10 @@ import {
   limitPayload,
   withDocumentsAdded,
 } from "@/lib/limits";
+import { describeFailure } from "@/lib/errors";
+import { withRetry } from "@/lib/retry";
+import { looksLikePdf, MAX_FILE_BYTES, megabytes } from "@/lib/uploads";
+import { hasEnv } from "@/lib/env";
 import PDFParser from "pdf2json";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -21,11 +25,11 @@ type IngestResult = {
   createdAt: string;
 };
 
-function errorMessage(err: unknown): string {
-  const message = err instanceof Error ? err.message : String(err);
-  // pdf2json surfaces errors already prefixed with "Error:"; don't stack them.
-  return message.replace(/^(Error:\s*)+/, "");
-}
+/**
+ * Embedding a long document runs well past a platform's default function
+ * timeout. Vercel allows 60s on Hobby, 300s on Pro.
+ */
+export const maxDuration = 60;
 
 // pdf2json pads its raw text output with page-break markers and long runs of
 // whitespace. Left alone, those produce chunks that are entirely blank — each
@@ -58,42 +62,14 @@ function extractText(buffer: Buffer): Promise<string> {
   });
 }
 
-/**
- * Transient upstream failures — rate limits and 5xx from the embedding service.
- * Worth another go; a malformed request or a bad key is not.
- */
-function isTransient(err: unknown): boolean {
-  const message = err instanceof Error ? err.message : String(err);
-  return (
-    /\b(429|500|502|503|504)\b/.test(message) ||
-    /UNAVAILABLE|RESOURCE_EXHAUSTED|DEADLINE_EXCEEDED|INTERNAL/i.test(message)
-  );
-}
-
-/**
- * One flaky embedding call used to cost the whole document, and across a
- * fifteen-file batch that happens often enough to notice — a single 503 from
- * the embedding service silently dropped one upload out of fifteen in testing.
- *
- * This retries the call, not the model or client configuration.
- */
-async function embedWithRetry(text: string, attempts = 3): Promise<number[]> {
-  for (let attempt = 0; ; attempt++) {
-    try {
-      return await embed(text);
-    } catch (err) {
-      if (attempt >= attempts - 1 || !isTransient(err)) throw err;
-      await new Promise((resolve) => setTimeout(resolve, 400 * 2 ** attempt));
-    }
-  }
-}
-
 // Embed every chunk, a few at a time, preserving order.
 async function embedAll(chunks: string[]): Promise<number[][]> {
   const embeddings: number[][] = new Array(chunks.length);
   for (let start = 0; start < chunks.length; start += EMBED_CONCURRENCY) {
     const slice = chunks.slice(start, start + EMBED_CONCURRENCY);
-    const results = await Promise.all(slice.map((c) => embedWithRetry(c)));
+    // One flaky embedding call used to cost the whole document; across a
+    // fifteen-file batch that happened often enough to lose an upload.
+    const results = await Promise.all(slice.map((c) => withRetry(() => embed(c))));
     results.forEach((e, i) => {
       embeddings[start + i] = e;
     });
@@ -167,6 +143,15 @@ export async function POST(req: NextRequest) {
     }
     const userId = user.id;
 
+    // Fail before parsing a multi-megabyte body we can't embed anyway.
+    if (!hasEnv("GOOGLE_API_KEY")) {
+      console.error("GOOGLE_API_KEY is not set — uploads cannot be embedded.");
+      return NextResponse.json(
+        { error: "Cram isn't fully configured on the server yet. This one's on us." },
+        { status: 500 }
+      );
+    }
+
     // A request body past the platform ceiling (~10MB here, 4.5MB on Vercel
     // serverless) fails inside the runtime's multipart parser with the opaque
     // "Failed to parse body as FormData". Catch it and say what actually went
@@ -196,6 +181,38 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "No file provided" }, { status: 400 });
     }
 
+    // Screen type and size before anything expensive. The client checks both
+    // too, but these are the versions that hold against a direct POST — and
+    // they produce a message naming the file rather than a generic refusal.
+    const rejected: { filename: string; error: string }[] = [];
+    const usable = files.filter((file) => {
+      if (!looksLikePdf(file)) {
+        rejected.push({
+          filename: file.name,
+          error: "Only PDFs are supported. Export or print this to PDF and try again.",
+        });
+        return false;
+      }
+      if (file.size > MAX_FILE_BYTES) {
+        rejected.push({
+          filename: file.name,
+          error: `Too large at ${megabytes(file.size)} — the limit is ${megabytes(MAX_FILE_BYTES)} per file. Try splitting it into chapters.`,
+        });
+        return false;
+      }
+      return true;
+    });
+
+    if (usable.length === 0) {
+      return NextResponse.json(
+        {
+          error: rejected.map((r) => `${r.filename}: ${r.error}`).join("; "),
+          failures: rejected,
+        },
+        { status: 400 }
+      );
+    }
+
     // Enforce the document allowance server-side. The dropzone greys itself out
     // at the limit, but this is the check a direct multipart POST runs into.
     const usage = await getUsage(supabase, user);
@@ -207,14 +224,17 @@ export async function POST(req: NextRequest) {
 
     // A batch that only partly fits: ingest what there's room for and report the
     // rest as refusals, rather than rejecting files we could have accepted.
-    const accepted = remaining === null ? files : files.slice(0, remaining);
-    const refused = remaining === null ? [] : files.slice(remaining);
+    const accepted = remaining === null ? usable : usable.slice(0, remaining);
+    const refused = remaining === null ? [] : usable.slice(remaining);
 
     const results: IngestResult[] = [];
-    const failures: { filename: string; error: string }[] = refused.map((file) => ({
-      filename: file.name,
-      error: "Skipped — that would go past your plan's document limit.",
-    }));
+    const failures: { filename: string; error: string }[] = [
+      ...rejected,
+      ...refused.map((file) => ({
+        filename: file.name,
+        error: "Skipped — that would go past your plan's document limit.",
+      })),
+    ];
 
     // Sequential across files: each PDF already parallelises its own embeddings.
     for (const file of accepted) {
@@ -222,7 +242,9 @@ export async function POST(req: NextRequest) {
         results.push(await ingestFile(supabase, file, userId));
       } catch (err) {
         console.error(`Upload error (${file.name}):`, err);
-        failures.push({ filename: file.name, error: errorMessage(err) });
+        // A rate limit reads very differently from an unreadable scan, and the
+        // student can only act on one of them.
+        failures.push({ filename: file.name, error: describeFailure(err).message });
       }
     }
 
@@ -247,6 +269,10 @@ export async function POST(req: NextRequest) {
     });
   } catch (err) {
     console.error("Upload error:", err);
-    return NextResponse.json({ error: errorMessage(err) }, { status: 500 });
+    const failure = describeFailure(err);
+    return NextResponse.json(
+      { error: failure.message, retryable: failure.retryable },
+      { status: failure.status }
+    );
   }
 }

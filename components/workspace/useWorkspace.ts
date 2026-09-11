@@ -9,11 +9,18 @@ import {
   messageFrom,
   uploadDocuments,
   LimitError,
+  ServiceError,
   UnauthorizedError,
 } from "@/lib/api";
 import { outOfDocuments, outOfQuestions } from "@/lib/tiers";
 import { formatCount } from "@/lib/utils";
-import type { CramDocument, LimitCode, ThreadMessage, UsageSnapshot } from "@/lib/types";
+import type {
+  CramDocument,
+  LimitCode,
+  QueryMode,
+  ThreadMessage,
+  UsageSnapshot,
+} from "@/lib/types";
 
 /** How many prior turns travel with each question so follow-ups resolve. */
 const HISTORY_LIMIT = 6;
@@ -190,9 +197,12 @@ export function useWorkspace() {
   );
 
   const send = useCallback(
-    async (raw?: string) => {
+    async (raw?: string, options: { mode?: QueryMode; documentId?: string | null } = {}) => {
       const question = (raw ?? input).trim();
       if (!question || asking) return;
+
+      const mode = options.mode ?? "ask";
+      const documentId = options.documentId ?? null;
 
       // Out of questions: raise the wall and keep what they typed, rather than
       // sending a request that can only come back refused.
@@ -214,7 +224,7 @@ export function useWorkspace() {
       setAsking(true);
 
       try {
-        const data = await askQuestion(question, history);
+        const data = await askQuestion(question, history, { mode, documentId });
         if (alive.current) {
           if (data.usage) setUsage(data.usage);
           setMessages((prev) => [
@@ -224,6 +234,8 @@ export function useWorkspace() {
               role: "assistant",
               content: data.answer ?? "I couldn't produce an answer for that.",
               sources: data.sources,
+              quiz: data.quiz,
+              mode: data.mode ?? mode,
             },
           ]);
         }
@@ -242,13 +254,20 @@ export function useWorkspace() {
         }
 
         if (alive.current) {
+          // A rate limit or a brief outage is worth repeating verbatim, so the
+          // turn carries what it needs to re-run itself.
+          const retryable = err instanceof ServiceError && err.retryable;
           setMessages((prev) => [
             ...prev,
             {
               id: newId(),
               role: "assistant",
-              content: `Something went wrong: ${messageFrom(err)}`,
+              content:
+                err instanceof ServiceError
+                  ? err.message
+                  : `Something went wrong: ${messageFrom(err)}`,
               error: true,
+              retry: retryable ? { question, mode, documentId } : undefined,
             },
           ]);
         }
@@ -257,6 +276,42 @@ export function useWorkspace() {
       }
     },
     [asking, handleAuthError, handleLimitError, input, messages, usage]
+  );
+
+  /**
+   * The quick actions. Each one writes a normal-looking turn into the thread
+   * ("Quiz me on Lecture 3.pdf") and then travels the same path as a typed
+   * question — same limit check, same retrieval, same RLS.
+   */
+  const runAction = useCallback(
+    (mode: QueryMode, documentId: string | null, concept?: string) => {
+      const scope = documentId
+        ? (documents.find((d) => d.documentId === documentId)?.filename ?? "that document")
+        : "all my documents";
+
+      const text =
+        mode === "quiz"
+          ? `Quiz me on ${scope}.`
+          : mode === "summarize"
+            ? `Summarise ${scope}.`
+            : `Explain: ${(concept ?? "").trim()}`;
+
+      return send(text, { mode, documentId });
+    },
+    [documents, send]
+  );
+
+  /** Re-runs a failed turn, dropping the error bubble it came from. */
+  const retryMessage = useCallback(
+    (message: ThreadMessage) => {
+      if (!message.retry) return;
+      setMessages((prev) => prev.filter((m) => m.id !== message.id));
+      void send(message.retry.question, {
+        mode: message.retry.mode,
+        documentId: message.retry.documentId,
+      });
+    },
+    [send]
   );
 
   const clearThread = useCallback(() => setMessages([]), []);
@@ -277,6 +332,8 @@ export function useWorkspace() {
     upload,
     remove,
     send,
+    runAction,
+    retryMessage,
     clearThread,
     hasDocuments: documents.length > 0,
     usage,

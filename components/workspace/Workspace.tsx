@@ -7,6 +7,7 @@ import { DocumentList } from "./DocumentList";
 import { MessageBubble, ThinkingBubble } from "./MessageBubble";
 import { NoDocumentsState, NoMessagesState } from "./ChatEmptyState";
 import { LimitWall } from "./LimitWall";
+import { QuickActions } from "./QuickActions";
 import { UploadDropzone } from "./UploadDropzone";
 import { UsageMeter } from "./UsageMeter";
 import { useWorkspace } from "./useWorkspace";
@@ -24,6 +25,8 @@ export function Workspace() {
   const ws = useWorkspace();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [pendingRemoval, setPendingRemoval] = useState<CramDocument | null>(null);
+  // Which document the quick actions work on. Null means all of them.
+  const [scopeId, setScopeId] = useState<string | null>(null);
 
   const threadRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -173,7 +176,7 @@ export function Workspace() {
           ) : (
             <div className="mx-auto w-full max-w-3xl space-y-6 px-4 py-8 sm:px-6">
               {ws.messages.map((message) => (
-                <MessageBubble key={message.id} message={message} />
+                <MessageBubble key={message.id} message={message} onRetry={ws.retryMessage} />
               ))}
               {ws.asking && <ThinkingBubble />}
             </div>
@@ -191,6 +194,16 @@ export function Workspace() {
           onChange={ws.setInput}
           onSubmit={() => void ws.send()}
           busy={ws.asking}
+          leading={
+            <QuickActions
+              documents={ws.documents}
+              scopeId={scopeId}
+              onScopeChange={setScopeId}
+              onRun={(mode, concept) => void ws.runAction(mode, scopeId, concept)}
+              disabled={!ws.hasDocuments}
+              busy={ws.asking}
+            />
+          }
           disabled={!ws.hasDocuments && !ws.docsLoading}
           placeholder={
             ws.hasDocuments ? "Ask about your materials…" : "Upload a PDF to get started…"

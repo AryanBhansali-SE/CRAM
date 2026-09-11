@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { Spinner } from "@/components/ui/Spinner";
 
 export function ChatComposer({
@@ -11,6 +11,7 @@ export function ChatComposer({
   busy,
   placeholder,
   hint,
+  leading,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -20,6 +21,12 @@ export function ChatComposer({
   placeholder: string;
   /** Replaces the keyboard-shortcut footer, e.g. when the allowance is spent. */
   hint?: string;
+  /**
+   * Rendered directly above the input, inside this container — the quick
+   * actions live here so they share one top border with the composer instead
+   * of stacking a second rule across the column.
+   */
+  leading?: ReactNode;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -42,6 +49,7 @@ export function ChatComposer({
 
   return (
     <div className="border-t border-border-base bg-background/80 px-4 py-4 backdrop-blur-xl sm:px-6">
+      {leading}
       <div className="mx-auto w-full max-w-3xl">
         <div className="flex items-end gap-2 rounded-2xl border border-border-base bg-surface p-2 shadow-sm transition-all duration-200 focus-within:border-brand-400 focus-within:shadow-md focus-within:shadow-brand-600/5">
           <textarea

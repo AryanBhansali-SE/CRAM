@@ -11,12 +11,14 @@ import type {
   DocumentsResponse,
   LimitCode,
   LimitPayload,
+  QueryMode,
   QueryResponse,
   Tier,
   UploadResponse,
   UsageResponse,
   UsageSnapshot,
 } from "./types";
+import { looksLikePdf, MAX_FILE_BYTES, notPdfMessage, tooLargeMessage } from "./uploads";
 
 /** Thrown when the session has expired so callers can bounce to login. */
 export class UnauthorizedError extends Error {
@@ -90,19 +92,6 @@ export async function fetchUsage(): Promise<UsageSnapshot | undefined> {
 }
 
 /**
- * Largest single file worth sending. The platform rejects request bodies past
- * roughly 10MB (Vercel's serverless limit is lower still, 4.5MB), and that
- * rejection surfaces as an unhelpful "Failed to parse body as FormData" from
- * deep inside the runtime — so screen for it here and say something useful.
- */
-export const MAX_FILE_BYTES = 4 * 1024 * 1024;
-
-function tooBigMessage(file: File): string {
-  const mb = (file.size / 1048576).toFixed(1);
-  return `${file.name} is ${mb}MB — the limit is ${MAX_FILE_BYTES / 1048576}MB per file.`;
-}
-
-/**
  * Uploads one file per request.
  *
  * Sending the whole batch as a single multipart body is what broke on large
@@ -126,8 +115,14 @@ export async function uploadDocuments(
   for (const [index, file] of files.entries()) {
     onProgress?.(index, files.length);
 
+    // Screened here so the user hears about it immediately, and so a 40MB scan
+    // never gets pushed up the wire just to be refused.
+    if (!looksLikePdf(file)) {
+      failures.push({ filename: file.name, error: notPdfMessage(file) });
+      continue;
+    }
     if (file.size > MAX_FILE_BYTES) {
-      failures.push({ filename: file.name, error: tooBigMessage(file) });
+      failures.push({ filename: file.name, error: tooLargeMessage(file) });
       continue;
     }
 
@@ -188,17 +183,40 @@ export async function deleteDocument(documentId: string): Promise<UsageSnapshot 
   return data.usage;
 }
 
+/**
+ * A server-side failure with a user-ready message. `retryable` marks the ones
+ * worth offering a retry for — rate limits and brief outages — as opposed to
+ * something that will fail identically every time.
+ */
+export class ServiceError extends Error {
+  readonly retryable: boolean;
+
+  constructor(message: string, retryable: boolean) {
+    super(message);
+    this.name = "ServiceError";
+    this.retryable = retryable;
+  }
+}
+
 export async function askQuestion(
   question: string,
-  history: ChatMessage[]
+  history: ChatMessage[],
+  options: { mode?: QueryMode; documentId?: string | null } = {}
 ): Promise<QueryResponse> {
   const res = await fetch("/api/query", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question, history }),
+    body: JSON.stringify({
+      question,
+      history,
+      mode: options.mode ?? "ask",
+      documentId: options.documentId ?? null,
+    }),
   });
   const data = await parseJson<QueryResponse>(res);
-  if (!res.ok) throw new Error(data.error || "Couldn't get an answer.");
+  if (!res.ok) {
+    throw new ServiceError(data.error || "Couldn't get an answer.", data.retryable === true);
+  }
   return data;
 }
 

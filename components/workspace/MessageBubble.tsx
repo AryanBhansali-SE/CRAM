@@ -1,8 +1,15 @@
 import { Markdown } from "@/lib/markdown";
 import { TypingDots } from "@/components/ui/Spinner";
+import { QuizCards } from "./QuizCard";
 import type { ThreadMessage } from "@/lib/types";
 
-export function MessageBubble({ message }: { message: ThreadMessage }) {
+export function MessageBubble({
+  message,
+  onRetry,
+}: {
+  message: ThreadMessage;
+  onRetry?: (message: ThreadMessage) => void;
+}) {
   if (message.role === "user") {
     return (
       <div className="flex animate-pop-in justify-end">
@@ -31,7 +38,27 @@ export function MessageBubble({ message }: { message: ThreadMessage }) {
           }`}
         >
           <Markdown content={message.content} />
+
+          {message.error && message.retry && onRetry && (
+            <button
+              onClick={() => onRetry(message)}
+              className="mt-2.5 inline-flex items-center gap-1.5 rounded-lg border border-red-300 px-2.5 py-1 text-xs font-medium transition-colors hover:bg-red-100 dark:border-red-900 dark:hover:bg-red-950/60"
+            >
+              <svg viewBox="0 0 24 24" fill="none" className="size-3.5" aria-hidden>
+                <path
+                  d="M4 12a8 8 0 1 1 2.3 5.6M4 12V7m0 5h5"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              Try again
+            </button>
+          )}
         </div>
+
+        {message.quiz && message.quiz.length > 0 && <QuizCards items={message.quiz} />}
 
         {message.sources && message.sources.length > 0 && (
           <div className="flex flex-wrap items-center gap-1.5">

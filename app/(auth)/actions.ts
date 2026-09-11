@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { anonymousTrialEnabled } from "@/lib/auth-shared";
+import { resolveSiteUrl } from "@/lib/site-url";
 
 export type AuthState = {
   error?: string;
@@ -62,7 +63,7 @@ export async function signup(_prev: AuthState, formData: FormData): Promise<Auth
   }
 
   const supabase = await createClient();
-  const origin = (await headers()).get("origin") ?? "";
+  const origin = resolveSiteUrl((await headers()).get("origin"));
 
   const { data, error } = await supabase.auth.signUp({
     email,
@@ -90,7 +91,7 @@ export async function signup(_prev: AuthState, formData: FormData): Promise<Auth
 export async function signInWithGoogle(formData: FormData): Promise<void> {
   const next = safeNext(formData.get("next"));
   const supabase = await createClient();
-  const origin = (await headers()).get("origin") ?? "";
+  const origin = resolveSiteUrl((await headers()).get("origin"));
 
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: "google",
