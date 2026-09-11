@@ -1,6 +1,12 @@
 #!/usr/bin/env node
 /**
- * Flip a user between the free and paid tiers, until Whop billing is wired up.
+ * Flip a user between the free and paid tiers by hand.
+ *
+ * Whop is the source of truth now — /api/webhooks/whop sets is_paid from real
+ * payment events, and it is the only thing in the app that writes that column.
+ * This stays for comping an account, for testing, and for fixing up someone who
+ * paid with a different email than they signed up with. Be aware that a later
+ * Whop event for the same user will overwrite whatever you set here.
  *
  *   node scripts/set-paid.mjs you@example.com          # -> paid
  *   node scripts/set-paid.mjs you@example.com false    # -> free
