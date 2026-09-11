@@ -34,16 +34,6 @@ const tiers = [
     featured: true,
     external: true,
   },
-  {
-    name: "Study group",
-    price: "$20",
-    cadence: "per month",
-    tagline: "Share a library with your classmates.",
-    features: ["Everything in Pro", "Up to 5 seats", "Shared document library", "Group chat history"],
-    cta: "Get Study group",
-    featured: false,
-    external: false,
-  },
 ];
 
 function Check() {
@@ -86,7 +76,9 @@ export function Pricing({
           </div>
         )}
 
-        <div className="mt-12 grid items-start gap-6 lg:grid-cols-3">
+        {/* Two live plans, centred. Study group moved to the roadmap on the
+            pricing page — a card with a price implies you can buy it. */}
+        <div className="mx-auto mt-12 grid max-w-4xl items-start gap-6 sm:grid-cols-2">
           {tiers.map((tier) => (
             <div
               key={tier.name}
@@ -135,8 +127,7 @@ export function Pricing({
         </div>
 
         <p className="mt-10 text-center text-sm text-foreground-subtle">
-          Free and Pro are live. Study group is still on the way — start free and upgrade whenever
-          the reading piles up.
+          Both plans are live. Start free and upgrade whenever the reading piles up.
         </p>
       </div>
     </section>

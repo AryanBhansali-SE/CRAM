@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Pricing } from "@/components/marketing/Pricing";
+import { Roadmap } from "@/components/marketing/Roadmap";
 import { FinalCTA } from "@/components/marketing/FinalCTA";
 import { getUser } from "@/lib/auth";
 
@@ -47,6 +48,8 @@ export default async function PricingPage() {
       </section>
 
       <Pricing authed={authed} showHeader={false} />
+
+      <Roadmap />
 
       <section className="border-t border-border-base py-20">
         <div className="mx-auto w-full max-w-3xl px-5">
