@@ -137,9 +137,11 @@ async function seedQuestions(userId, count) {
 }
 
 async function setPaid(userId, isPaid) {
-  const res = await rest(`profiles?id=eq.${userId}`, {
-    method: "PATCH",
-    body: JSON.stringify({ is_paid: isPaid }),
+  // Upsert: free users have no profile row until they're upgraded.
+  const res = await rest("profiles", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=representation" },
+    body: JSON.stringify({ id: userId, is_paid: isPaid }),
   });
   if (!res.ok) throw new Error(`setPaid: ${res.status} ${await res.text()}`);
 }

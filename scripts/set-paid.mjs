@@ -90,10 +90,12 @@ const isPaid = flagArg === undefined ? true : flagArg === "true";
 const user = await findUserByEmail(target);
 if (!user) die(`No account found for ${target}.`);
 
-const res = await fetch(`${URL_BASE}/rest/v1/profiles?id=eq.${user.id}`, {
-  method: "PATCH",
-  headers: { ...headers, Prefer: "return=representation" },
-  body: JSON.stringify({ is_paid: isPaid }),
+// Upsert rather than update: a profile row only has to exist once someone is
+// actually upgraded, so free users never have one to patch.
+const res = await fetch(`${URL_BASE}/rest/v1/profiles`, {
+  method: "POST",
+  headers: { ...headers, Prefer: "resolution=merge-duplicates,return=representation" },
+  body: JSON.stringify({ id: user.id, is_paid: isPaid }),
 });
 
 if (!res.ok) {
@@ -102,9 +104,7 @@ if (!res.ok) {
 
 const rows = await res.json();
 if (rows.length === 0) {
-  die(
-    `No profile row for ${target}. The trigger in migration 0002 creates one on signup — has that migration been applied?`
-  );
+  die(`Wrote nothing for ${target}. Has migration 0002 been applied?`);
 }
 
 console.log(`✓ ${target} is now ${isPaid ? "PAID" : "FREE"} (${user.id})`);
