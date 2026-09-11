@@ -58,12 +58,42 @@ function extractText(buffer: Buffer): Promise<string> {
   });
 }
 
+/**
+ * Transient upstream failures — rate limits and 5xx from the embedding service.
+ * Worth another go; a malformed request or a bad key is not.
+ */
+function isTransient(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return (
+    /\b(429|500|502|503|504)\b/.test(message) ||
+    /UNAVAILABLE|RESOURCE_EXHAUSTED|DEADLINE_EXCEEDED|INTERNAL/i.test(message)
+  );
+}
+
+/**
+ * One flaky embedding call used to cost the whole document, and across a
+ * fifteen-file batch that happens often enough to notice — a single 503 from
+ * the embedding service silently dropped one upload out of fifteen in testing.
+ *
+ * This retries the call, not the model or client configuration.
+ */
+async function embedWithRetry(text: string, attempts = 3): Promise<number[]> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await embed(text);
+    } catch (err) {
+      if (attempt >= attempts - 1 || !isTransient(err)) throw err;
+      await new Promise((resolve) => setTimeout(resolve, 400 * 2 ** attempt));
+    }
+  }
+}
+
 // Embed every chunk, a few at a time, preserving order.
 async function embedAll(chunks: string[]): Promise<number[][]> {
   const embeddings: number[][] = new Array(chunks.length);
   for (let start = 0; start < chunks.length; start += EMBED_CONCURRENCY) {
     const slice = chunks.slice(start, start + EMBED_CONCURRENCY);
-    const results = await Promise.all(slice.map((c) => embed(c)));
+    const results = await Promise.all(slice.map((c) => embedWithRetry(c)));
     results.forEach((e, i) => {
       embeddings[start + i] = e;
     });
@@ -137,7 +167,24 @@ export async function POST(req: NextRequest) {
     }
     const userId = user.id;
 
-    const formData = await req.formData();
+    // A request body past the platform ceiling (~10MB here, 4.5MB on Vercel
+    // serverless) fails inside the runtime's multipart parser with the opaque
+    // "Failed to parse body as FormData". Catch it and say what actually went
+    // wrong — the client sends one file per request, so reaching this means a
+    // single PDF was oversized.
+    let formData: FormData;
+    try {
+      formData = await req.formData();
+    } catch (err) {
+      console.error("Upload body parse failed:", err);
+      return NextResponse.json(
+        {
+          error:
+            "That PDF was too large to upload. Try a file under 4MB, or split it into sections.",
+        },
+        { status: 413 }
+      );
+    }
 
     // "files" is the multi-upload field; "file" is kept for the original
     // single-file callers.

@@ -89,14 +89,94 @@ export async function fetchUsage(): Promise<UsageSnapshot | undefined> {
   return data.usage;
 }
 
-export async function uploadDocuments(files: File[]): Promise<UploadResponse> {
-  const formData = new FormData();
-  for (const file of files) formData.append("files", file);
+/**
+ * Largest single file worth sending. The platform rejects request bodies past
+ * roughly 10MB (Vercel's serverless limit is lower still, 4.5MB), and that
+ * rejection surfaces as an unhelpful "Failed to parse body as FormData" from
+ * deep inside the runtime — so screen for it here and say something useful.
+ */
+export const MAX_FILE_BYTES = 4 * 1024 * 1024;
 
-  const res = await fetch("/api/upload", { method: "POST", body: formData });
-  const data = await parseJson<UploadResponse>(res);
-  if (!res.ok || !data.success) throw new Error(data.error || "Upload failed.");
-  return data;
+function tooBigMessage(file: File): string {
+  const mb = (file.size / 1048576).toFixed(1);
+  return `${file.name} is ${mb}MB — the limit is ${MAX_FILE_BYTES / 1048576}MB per file.`;
+}
+
+/**
+ * Uploads one file per request.
+ *
+ * Sending the whole batch as a single multipart body is what broke on large
+ * selections: fifteen real PDFs comfortably exceed the request-body ceiling, and
+ * the whole upload failed as one. One request per file keeps every body small
+ * whatever the batch size, lets a single unreadable PDF fail on its own, and
+ * gives the caller something to report progress against.
+ *
+ * Sequential rather than parallel, matching the server: each PDF already
+ * parallelises its own embedding calls.
+ */
+export async function uploadDocuments(
+  files: File[],
+  onProgress?: (done: number, total: number) => void
+): Promise<UploadResponse> {
+  const documents: CramDocument[] = [];
+  const failures: { filename: string; error: string }[] = [];
+  let usage: UsageSnapshot | undefined;
+  let limitHit: LimitError | null = null;
+
+  for (const [index, file] of files.entries()) {
+    onProgress?.(index, files.length);
+
+    if (file.size > MAX_FILE_BYTES) {
+      failures.push({ filename: file.name, error: tooBigMessage(file) });
+      continue;
+    }
+
+    const formData = new FormData();
+    formData.append("files", file);
+
+    try {
+      const res = await fetch("/api/upload", { method: "POST", body: formData });
+      const data = await parseJson<UploadResponse>(res);
+
+      if (!res.ok || !data.success) {
+        failures.push({ filename: file.name, error: data.error || "Upload failed." });
+        continue;
+      }
+
+      documents.push(...(data.documents ?? []));
+      failures.push(...(data.failures ?? []));
+      usage = data.usage ?? usage;
+    } catch (err) {
+      // Out of document slots: nothing later in the batch can succeed either, so
+      // stop here and report the rest as skipped rather than firing doomed
+      // requests at the server.
+      if (err instanceof LimitError) {
+        limitHit = err;
+        usage = err.usage;
+        for (const remaining of files.slice(index)) {
+          failures.push({
+            filename: remaining.name,
+            error: "Skipped — that would go past your plan's document limit.",
+          });
+        }
+        break;
+      }
+      if (err instanceof UnauthorizedError) throw err;
+      failures.push({ filename: file.name, error: messageFrom(err) });
+    }
+  }
+
+  onProgress?.(files.length, files.length);
+
+  // Nothing landed and the plan was the reason — let the caller raise the wall
+  // instead of showing a list of failures.
+  if (documents.length === 0 && limitHit) throw limitHit;
+
+  if (documents.length === 0) {
+    throw new Error(failures.map((f) => `${f.filename}: ${f.error}`).join("; ") || "Upload failed.");
+  }
+
+  return { success: true, documents, failures, usage, limitReached: limitHit !== null };
 }
 
 export async function deleteDocument(documentId: string): Promise<UsageSnapshot | undefined> {

@@ -131,7 +131,12 @@ export function useWorkspace() {
       setNotice({ tone: "info", text: `Processing ${formatCount(files.length, "PDF")}…` });
 
       try {
-        const result = await uploadDocuments(files);
+        // Each file is its own request now, so a batch has real progress to
+        // report rather than one long unexplained wait.
+        const result = await uploadDocuments(files, (done, total) => {
+          if (!alive.current || total <= 1 || done >= total) return;
+          setNotice({ tone: "info", text: `Processing PDF ${done + 1} of ${total}…` });
+        });
         const added = result.documents?.length ?? 0;
         const failures = result.failures ?? [];
 
